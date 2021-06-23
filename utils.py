@@ -3,6 +3,7 @@ import os
 from os.path import join
 from PIL import Image
 import numpy as np
+from typing import Tuple
 
 class ImageGenerator(object):
 
@@ -36,7 +37,7 @@ class ImageGenerator(object):
         """
         list_paths = []
         for i in os.listdir(path):
-            for j in os.listdir(os.listdir(join(path,i))):
+            for j in os.listdir(str(join(path,i))):
                 if (j.split('_')[-1]==match_string+'.png'):
                     list_paths.append(str(join(path,i,j)))
 
@@ -50,10 +51,10 @@ class ImageGenerator(object):
         """
         return len(self.list_paths)/self.batch_size
 
-    def __next__(self) -> tuple[np.ndarray,np.ndarray]:
+    def __next__(self) -> Tuple[np.ndarray,np.ndarray]:
         """
         Returns batch of images and their corresponding segmentation images
-        @rtype: tuple[np.ndarray,np.ndarray]
+        @rtype: Tuple[np.ndarray,np.ndarray]
         """
         batch_x = []
         batch_y = []
@@ -63,9 +64,9 @@ class ImageGenerator(object):
             idx = np.arange(start=self.curr_index,stop=self.curr_index+self.batch_size)
             self.curr_index+= self.batch_size
         for i in idx:
-            batch_x.append(Image.open(self.list_paths_x[i]))
+            batch_x.append(np.asarray(Image.open(self.list_paths_x[i])))
             y_path = self.get_path_y(self.list_paths_x[i])
-            batch_y.append(Image.open(y_path))
+            batch_y.append(np.asarray(Image.open(y_path)))
         return np.array(batch_x),np.array(batch_y)
 
     def get_path_y(self,path) -> str:
@@ -79,6 +80,6 @@ class ImageGenerator(object):
         filename = y_path[-1].split('_')
         filename[-1] = self.match_string_y + '.png'
         y_path[-1] = '_'.join(filename)
-        y_path = y_path.join('/')
+        y_path = '/'.join(y_path)
 
         return y_path
