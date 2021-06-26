@@ -19,7 +19,7 @@ def conv2d_block(input,n_filters,kernel_size=3,stride=1,padding='valid',batch_no
 def deconv2d_block(input,concatenation_tensor,n_filters,kernel_size=3,stride=1,padding='valid'):
     x = Conv2DTranspose(n_filters, kernel_size=kernel_size, strides=stride, padding=padding)(input)
     ch, cw = get_crop_shape(int_shape(concatenation_tensor), int_shape(x))
-    conv = Cropping2D(cropping=(ch, cw))(concatenation_tensor)
+    concatenation_tensor = Cropping2D(cropping=(ch, cw))(concatenation_tensor)
     x = concatenate([x, concatenation_tensor])
     x = conv2d_block(input=x, n_filters=n_filters, batch_norm=False, padding=padding)
     return x
