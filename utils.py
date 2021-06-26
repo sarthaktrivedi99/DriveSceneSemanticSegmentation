@@ -3,11 +3,14 @@ from os.path import join
 from PIL import Image
 import numpy as np
 from typing import Tuple
-from scipy.ndimage import rotate, zoom
+from scipy.ndimage import rotate
 import random
+import psutil
+import matplotlib.pyplot as plt
+from collections import defaultdict
+from tensorflow.keras.utils import Sequence
 
-
-class ImageGenerator(object):
+class ImageGenerator(Sequence):
 
     def __init__(self, batch_size, path_to_x, path_to_y, match_string_x, match_string_y, aug_fn,
                  random_generation=True) -> object:
@@ -51,9 +54,9 @@ class ImageGenerator(object):
         Returns the length of the generator
         @return: int
         """
-        return len(self.list_paths) / self.batch_size
+        return len(self.list_paths_x) // self.batch_size
 
-    def __next__(self) -> Tuple[np.ndarray, np.ndarray]:
+    def __getitem__(self,indexes) -> Tuple[np.ndarray, np.ndarray]:
         """
         Returns batch of images and their corresponding segmentation images
         @rtype: Tuple[np.ndarray,np.ndarray]
@@ -61,35 +64,124 @@ class ImageGenerator(object):
         batch_x = []
         batch_y = []
         if (self.random_gen):
-            idx = np.random.uniform(low=0, high=len(self.list_paths), size=(self.batch_size))
+            idx = np.random.uniform(low=0, high=len(self.list_paths_x), size=(self.batch_size))
         else:
             idx = np.arange(start=self.curr_index, stop=self.curr_index + self.batch_size)
             self.curr_index += self.batch_size
         for i in idx:
-            x_sample = np.asarray(Image.open(self.list_paths_x[i])) / 255
+            x_sample = np.asarray(Image.open(self.list_paths_x[i]).convert('RGB')) / 255
             y_path = self.get_path_y(self.list_paths_x[i])
-            y_sample = np.asarray(Image.open(y_path)) / 255
+            y_sample = np.asarray(Image.open(y_path).convert('RGB'))
             if random.choice([True, False]):
                 x_sample, y_sample = self.aug_fn(x_sample, y_sample)
+            y_sample = mask_to_arr(y_sample)
             batch_y.append(y_sample)
             batch_x.append(x_sample)
-        return np.array(batch_x), np.array(batch_y)
+        return np.asarray(batch_x), np.asarray(batch_y)
 
-    def get_path_y(self, path) -> str:
+    def get_path_y(self,path) -> str:
         """
         Returns path to label image for a given input image
         @param path: path to the input image
         @rtype: str
         """
-        y_path = path.split('/')
-        y_path[0] = self.path_y.split('/')[0]
+        if psutil.WINDOWS:
+            path_split = '\\'
+        else:
+            path_split = '/'
+
+        y_path = path.split(path_split)
+        y_path[0] = self.path_y.split(path_split)[0]
         filename = y_path[-1].split('_')
         filename[-1] = self.match_string_y + '.png'
         y_path[-1] = '_'.join(filename)
-        y_path = '/'.join(y_path)
-
+        y_path = path_split.join(y_path)
         return y_path
 
+# Labeling from original Cityscapes Scripts
+# def get_label():
+#     Label = namedtuple('Label', [
+#         'name',
+#         'id',
+#         'trainId',
+#         'category',
+#         'categoryId',
+#         'hasInstances',
+#         'ignoreInEval',
+#         'color',
+#     ])
+#
+#
+#     labels = [
+#         #Label('unlabeled', 0, 255, 'void', 0, False, True, (0, 0, 0)),
+#         #Label('ego vehicle', 1, 255, 'void', 0, False, True, (0, 0, 0)),
+#         #Label('rectification border', 2, 255, 'void', 0, False, True, (0, 0, 0)),
+#         #Label('out of roi', 3, 255, 'void', 0, False, True, (0, 0, 0)),
+#         #Label('static', 4, 255, 'void', 0, False, True, (0, 0, 0)),
+#         #Label('dynamic', 5, 255, 'void', 0, False, True, (111, 74, 0)),
+#         #Label('ground', 6, 255, 'void', 0, False, True, (81, 0, 81)),
+#         Label('road', 1, 0, 'flat', 1, False, False, (128, 64, 128)),
+#         Label('sidewalk', 2, 1, 'flat', 1, False, False, (244, 35, 232)),
+#         #Label('parking', 9, 255, 'flat', 1, False, True, (250, 170, 160)),
+#         #Label('rail track', 10, 255, 'flat', 1, False, True, (230, 150, 140)),
+#         Label('building', 3, 2, 'construction', 2, False, False, (70, 70, 70)),
+#         Label('wall', 4, 3, 'construction', 2, False, False, (102, 102, 156)),
+#         Label('fence', 5, 4, 'construction', 2, False, False, (190, 153, 153)),
+#         # Label('guard rail', 14, 255, 'construction', 2, False, True, (180, 165, 180)),
+#         # Label('bridge', 15, 255, 'construction', 2, False, True, (150, 100, 100)),
+#         # Label('tunnel', 16, 255, 'construction', 2, False, True, (150, 120, 90)),
+#         Label('pole', 6, 5, 'object', 3, False, False, (153, 153, 153)),
+#         # Label('polegroup', 18, 255, 'object', 3, False, True, (153, 153, 153)),
+#         Label('traffic light', 7, 6, 'object', 3, False, False, (250, 170, 30)),
+#         Label('traffic sign', 8, 7, 'object', 3, False, False, (220, 220, 0)),
+#         Label('vegetation', 9, 8, 'nature', 4, False, False, (107, 142, 35)),
+#         Label('terrain', 10, 9, 'nature', 4, False, False, (152, 251, 152)),
+#         Label('sky', 11, 10, 'sky', 5, False, False, (70, 130, 180)),
+#         Label('person', 12, 11, 'human', 6, True, False, (220, 20, 60)),
+#         Label('rider', 13, 12, 'human', 6, True, False, (255, 0, 0)),
+#         Label('car', 14, 13, 'vehicle', 7, True, False, (0, 0, 142)),
+#         Label('truck', 15, 14, 'vehicle', 7, True, False, (0, 0, 70)),
+#         Label('bus', 16, 15, 'vehicle', 7, True, False, (0, 60, 100)),
+#         # Label('caravan', 29, 255, 'vehicle', 7, True, True, (0, 0, 90)),
+#         # Label('trailer', 30, 255, 'vehicle', 7, True, True, (0, 0, 110)),
+#         Label('train', 17, 16, 'vehicle', 7, True, False, (0, 80, 100)),
+#         Label('motorcycle', 18, 17, 'vehicle', 7, True, False, (0, 0, 230)),
+#         Label('bicycle', 19, 18, 'vehicle', 7, True, False, (119, 11, 32)),
+#         # Label('license plate', -1, -1, 'vehicle', 7, False, True, (0, 0, 142)),
+#     ]
+#     return labels
+
+def get_label() -> dict:
+    label_dict = {
+        (0,0,0):0,
+        (128, 64, 128):1,
+        (244, 35, 232):2,
+        (70, 70, 70):3,
+        (102, 102, 156):4,
+        (190, 153, 153):5,
+        (153, 153, 153):6,
+        (250, 170, 30):7,
+        (220, 220, 0):8,
+        (107, 142, 35):9,
+        (152, 251, 152):10,
+        (70, 130, 180):11,
+        (220, 20, 60):12,
+        (255, 0, 0):13,
+        (0, 0, 142):14,
+        (0, 0, 70):15,
+        (0, 60, 100):16,
+        (0, 80, 100):17,
+        (0, 0, 230):18,
+        (119, 11, 32):19
+
+    }
+    label_dict_exception = defaultdict(lambda: 0,label_dict)
+    return label_dict_exception
+
+def get_color() -> dict:
+    label_dict = get_label()
+    color_dict = {value: key for (key, value) in label_dict.items()}
+    return  color_dict
 
 def augmentation_fn(x, y, rotation=True, noise=True) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -108,3 +200,33 @@ def augmentation_fn(x, y, rotation=True, noise=True) -> Tuple[np.ndarray, np.nda
         noise = np.random.normal(loc=0.1, scale=0.01, size=x.shape)
         x = x + noise
     return x, y
+
+def arr_to_categorical(image):
+    cp = np.zeros(shape=(image.shape[0],image.shape[1],len(get_label().items())))
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            cp[i,j,int(image[i,j])] = 1
+    return cp
+def mask_to_arr(image):
+    label_dict = get_label()
+    arr = np.zeros((image.shape[0],image.shape[1],1))
+    for i,j in label_dict.items():
+        x,y= np.where(np.sum(image,axis=-1)==sum(i))[:2]
+        arr[x,y] = j
+    # x,y = np.where(np.argmax(arr,axis=-1)==0)
+    # z = np.zeros_like(x)
+    # arr[x,y,z] = 1
+    # for i in range(image.shape[0]):
+    #     for j in range(image.shape[1]):
+    #         try:
+    #             arr[i,j,label_dict[tuple(image[i,j,:])]-1] = 1
+    #         except:
+    #             continue
+    return arr_to_categorical(arr)
+
+if __name__ == '__main__':
+    test_gen = ImageGenerator(8, join('leftImg8bit', 'train'), join('gtFine', 'train'), 'leftImg8bit', 'gtFine_color',
+                              augmentation_fn, False)
+    images, labels = next(test_gen)
+    plt.imshow(labels[1,:,:,14])
+    plt.show()
