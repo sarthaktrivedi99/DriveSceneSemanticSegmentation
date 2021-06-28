@@ -9,17 +9,19 @@ def conv2d_block(input,n_filters,kernel_size=3,stride=1,padding='valid',batch_no
     @param stride
     @param batch_norm
     """
-    x = Conv2D(filters=n_filters,kernel_size=kernel_size,strides=stride,kernel_initializer='he_normal',padding=padding,activation=activation)(input)
+    x = Conv2D(filters=n_filters,kernel_size=kernel_size,strides=stride,kernel_initializer='he_normal',padding=padding,activation=activation,use_bias=not batch_norm)(input)
     if batch_norm:
         x= BatchNormalization()(x)
     # x = Activation('relu')(x)
-    x = Conv2D(filters=n_filters, kernel_size=kernel_size, strides=stride, kernel_initializer='he_normal', padding=padding,activation=activation)(x)
+    x = Conv2D(filters=n_filters, kernel_size=kernel_size, strides=stride, kernel_initializer='he_normal', padding=padding,activation=activation,use_bias= not batch_norm)(x)
+    if batch_norm:
+        x = BatchNormalization()(x)
     return x
 
-def deconv2d_block(input,concatenation_tensor,n_filters,kernel_size=3,stride=1,padding='valid'):
-    x = Conv2DTranspose(n_filters, kernel_size=kernel_size, strides=stride, padding=padding)(input)
+def deconv2d_block(input,concatenation_tensor,n_filters,padding='valid'):
+    x = Conv2DTranspose(n_filters, kernel_size=(2,2),strides=(2,2), padding=padding)(input)
     ch, cw = get_crop_shape(int_shape(concatenation_tensor), int_shape(x))
-    conv = Cropping2D(cropping=(ch, cw))(concatenation_tensor)
+    concationation_tensor = Cropping2D(cropping=(ch, cw))(concatenation_tensor)
     x = concatenate([x, concatenation_tensor])
     x = conv2d_block(input=x, n_filters=n_filters, batch_norm=False, padding=padding)
     return x
@@ -68,4 +70,4 @@ def UNET(
     return model
 
 if __name__ == '__main__':
-    UNET(input_shape=(None,None,3)).summary()
+    UNET(input_shape=(1024,2048,3),num_classes=1).summary()
