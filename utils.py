@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 from tensorflow.keras.utils import Sequence
 
-class ImageGenerator(Sequence):
+class ImageGenerator(object):
 
     def __init__(self, batch_size, path_to_x, path_to_y, match_string_x, match_string_y, aug_fn,
                  random_generation=True) -> object:
@@ -56,13 +56,17 @@ class ImageGenerator(Sequence):
         """
         return len(self.list_paths_x) // self.batch_size
 
-    def __getitem__(self,indexes) -> Tuple[np.ndarray, np.ndarray]:
+    def __iter__(self):
+        return self
+    def __next__(self) -> Tuple[np.ndarray, np.ndarray]:
         """
         Returns batch of images and their corresponding segmentation images
         @rtype: Tuple[np.ndarray,np.ndarray]
         """
         batch_x = []
         batch_y = []
+        if (self.curr_index==len(self.list_paths_x)):
+            self.curr_inde=0
         if (self.random_gen):
             idx = np.random.uniform(low=0, high=len(self.list_paths_x), size=(self.batch_size))
         else:
@@ -72,8 +76,9 @@ class ImageGenerator(Sequence):
             x_sample = np.asarray(Image.open(self.list_paths_x[i]).convert('RGB')) / 255
             y_path = self.get_path_y(self.list_paths_x[i])
             y_sample = np.asarray(Image.open(y_path).convert('RGB'))
-            if random.choice([True, False]):
-                x_sample, y_sample = self.aug_fn(x_sample, y_sample)
+            if self.aug_fn!=None:
+                if random.choice([True, False]):
+                    x_sample, y_sample = self.aug_fn(x_sample, y_sample)
             y_sample = mask_to_arr(y_sample)
             batch_y.append(y_sample)
             batch_x.append(x_sample)
