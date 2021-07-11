@@ -207,11 +207,16 @@ def augmentation_fn(x, y, rotation=True, noise=True) -> Tuple[np.ndarray, np.nda
     return x, y
 
 def arr_to_categorical(image):
-    cp = np.zeros(shape=(image.shape[0],image.shape[1],len(get_label().items())))
-    for i in range(image.shape[0]):
-        for j in range(image.shape[1]):
-            cp[i,j,int(image[i,j])] = 1
-    return cp
+    #cp = np.zeros(shape=(image.shape[0],image.shape[1],len(get_label().items())))
+    #for i in range(image.shape[0]):
+        #for j in range(image.shape[1]):
+            #cp[i,j,int(image[i,j])] = 1
+    #return cp
+    cp = np.eye(len(get_label()))[image.astype(int)]
+    # for i in range(image.shape[0]):
+    #     for j in range(image.shape[1]):
+    #         cp[i,j,int(image[i,j])] = 1
+    return cp.reshape((image.shape[0],image.shape[1],len(get_label().items())))
 def mask_to_arr(image):
     label_dict = get_label()
     arr = np.zeros((image.shape[0],image.shape[1],1))
