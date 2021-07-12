@@ -20,8 +20,8 @@ def conv2d_block(input,n_filters,kernel_size=3,stride=1,padding='valid',batch_no
 
 def deconv2d_block(input,concatenation_tensor,n_filters,padding='valid'):
     x = Conv2DTranspose(n_filters, kernel_size=(2,2),strides=(2,2), padding=padding)(input)
-    ch, cw = get_crop_shape(int_shape(concatenation_tensor), int_shape(x))
-    concationation_tensor = Cropping2D(cropping=(ch, cw))(concatenation_tensor)
+    # ch, cw = get_crop_shape(int_shape(concatenation_tensor), int_shape(x))
+    # concationation_tensor = Cropping2D(cropping=(ch, cw))(concatenation_tensor)
     x = concatenate([x, concatenation_tensor])
     x = conv2d_block(input=x, n_filters=n_filters, batch_norm=False, padding=padding)
     return x
@@ -56,7 +56,7 @@ def UNET(
     for l in range(num_layers):
         x = conv2d_block(input=x, n_filters=filters, padding='same')
         down_layers.append(x)
-        x = MaxPooling2D((2, 2), strides=2)(x)
+        x = MaxPooling2D((2, 2))(x)
         filters = filters * 2
 
     x = conv2d_block(input=x, n_filters=filters, batch_norm=False, padding='same')
@@ -70,4 +70,4 @@ def UNET(
     return model
 
 if __name__ == '__main__':
-    UNET(input_shape=(1024,2048,3),num_classes=1).summary()
+    UNET(input_shape=(None,None,3),num_classes=20).summary()
