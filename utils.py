@@ -8,11 +8,11 @@ import random
 import psutil
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from tensorflow.keras.utils import Sequence
+# from numba import jit
 
 class ImageGenerator(object):
 
-    def __init__(self, batch_size, path_to_x, path_to_y, match_string_x, match_string_y, aug_fn,
+    def __init__(self, batch_size, path_to_x, path_to_y, match_string_x, match_string_y, aug_fn, splits,
                  random_generation=True) -> object:
         """
         @param batch_size: Batch size
@@ -34,6 +34,7 @@ class ImageGenerator(object):
         self.random_gen = random_generation
         self.curr_index = 0
         self.list_paths_x = self.get_paths(path_to_x, match_string_x)
+        self.splits = splits
         # self.list_paths_y = self.get_paths(path_to_y,match_string_y)
 
     def get_paths(self, path, match_string) -> list:
@@ -48,16 +49,16 @@ class ImageGenerator(object):
                     list_paths.append(str(join(path, i, j)))
 
         return list_paths
+    def __iter__(self):
+        return self
 
     def __len__(self) -> int:
         """
         Returns the length of the generator
         @return: int
         """
-        return len(self.list_paths_x) // self.batch_size
+        return (len(self.list_paths_x)*self.splits) // self.batch_size
 
-    def __iter__(self):
-        return self
     def __next__(self) -> Tuple[np.ndarray, np.ndarray]:
         """
         Returns batch of images and their corresponding segmentation images
@@ -65,8 +66,6 @@ class ImageGenerator(object):
         """
         batch_x = []
         batch_y = []
-        if (self.curr_index==len(self.list_paths_x)):
-            self.curr_inde=0
         if (self.random_gen):
             idx = np.random.uniform(low=0, high=len(self.list_paths_x), size=(self.batch_size))
         else:
@@ -76,13 +75,20 @@ class ImageGenerator(object):
             x_sample = np.asarray(Image.open(self.list_paths_x[i]).convert('RGB')) / 255
             y_path = self.get_path_y(self.list_paths_x[i])
             y_sample = np.asarray(Image.open(y_path).convert('RGB'))
-            if self.aug_fn!=None:
-                if random.choice([True, False]):
-                    x_sample, y_sample = self.aug_fn(x_sample, y_sample)
+            if random.choice([True, False]):
+                x_sample, y_sample = self.aug_fn(x_sample, y_sample)
             y_sample = mask_to_arr(y_sample)
-            batch_y.append(y_sample)
-            batch_x.append(x_sample)
+            if self.splits>1:
+                x_sample = split(x_sample,self.splits)
+                y_sample = split(y_sample,self.splits)
+                for i in range(self.splits):
+                    batch_x.append(x_sample[i])
+                    batch_y.append(y_sample[i])
+            else:
+                batch_y.append(y_sample)
+                batch_x.append(x_sample)
         return np.asarray(batch_x), np.asarray(batch_y)
+
 
     def get_path_y(self,path) -> str:
         """
@@ -156,6 +162,15 @@ class ImageGenerator(object):
 #     ]
 #     return labels
 
+def split(image,splits):
+    patches = []
+    # print(image.shape)
+    patch_h = image.shape[0] //(splits+1)
+    patch_w = image.shape[1] //(splits+1)
+    for i in range(splits):
+        # print(i*patch_h)
+        patches.append(image[i*patch_h:(i+1)*patch_h,i*patch_w:(i+1)*patch_w,:])
+    return  patches
 def get_label() -> dict:
     label_dict = {
         (0,0,0):0,
@@ -183,10 +198,12 @@ def get_label() -> dict:
     label_dict_exception = defaultdict(lambda: 0,label_dict)
     return label_dict_exception
 
+
 def get_color() -> dict:
     label_dict = get_label()
     color_dict = {value: key for (key, value) in label_dict.items()}
     return  color_dict
+
 
 def augmentation_fn(x, y, rotation=True, noise=True) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -206,22 +223,23 @@ def augmentation_fn(x, y, rotation=True, noise=True) -> Tuple[np.ndarray, np.nda
         x = x + noise
     return x, y
 
+
 def arr_to_categorical(image):
-    #cp = np.zeros(shape=(image.shape[0],image.shape[1],len(get_label().items())))
-    #for i in range(image.shape[0]):
-        #for j in range(image.shape[1]):
-            #cp[i,j,int(image[i,j])] = 1
-    #return cp
+    # cp = np.zeros()
+    # print(image.dtype)
+
     cp = np.eye(len(get_label()))[image.astype(int)]
     # for i in range(image.shape[0]):
     #     for j in range(image.shape[1]):
     #         cp[i,j,int(image[i,j])] = 1
     return cp.reshape((image.shape[0],image.shape[1],len(get_label().items())))
+
+
 def mask_to_arr(image):
     label_dict = get_label()
     arr = np.zeros((image.shape[0],image.shape[1],1))
     for i,j in label_dict.items():
-        x,y= np.where(np.sum(image,axis=-1)==sum(i))[:2]
+        x,y= np.where(np.sum(image,axis=-1)==np.sum(i))[:2]
         arr[x,y] = j
     # x,y = np.where(np.argmax(arr,axis=-1)==0)
     # z = np.zeros_like(x)
@@ -235,8 +253,11 @@ def mask_to_arr(image):
     return arr_to_categorical(arr)
 
 if __name__ == '__main__':
-    test_gen = ImageGenerator(8, join('leftImg8bit', 'train'), join('gtFine', 'train'), 'leftImg8bit', 'gtFine_color',
-                              augmentation_fn, False)
+    test_gen = ImageGenerator(1, join('leftImg8bit', 'train'), join('gtFine', 'train'), 'leftImg8bit', 'gtFine_color',
+                              augmentation_fn, 3, False)
     images, labels = next(test_gen)
-    plt.imshow(labels[1,:,:,14])
-    plt.show()
+    print(labels.shape)
+    images, labels = next(test_gen)
+    print(labels.shape)
+    # plt.imshow(labels[1,:,:,14])
+    # plt.show()
