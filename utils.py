@@ -8,6 +8,7 @@ import random
 import psutil
 import matplotlib.pyplot as plt
 from collections import defaultdict
+from tqdm import tqdm
 # from numba import jit
 
 class ImageGenerator(object):
@@ -57,7 +58,7 @@ class ImageGenerator(object):
         Returns the length of the generator
         @return: int
         """
-        return (len(self.list_paths_x)*self.splits) // self.batch_size
+        return (len(self.list_paths_x)) // self.batch_size
 
     def __next__(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -69,6 +70,8 @@ class ImageGenerator(object):
         if (self.random_gen):
             idx = np.random.uniform(low=0, high=len(self.list_paths_x), size=(self.batch_size))
         else:
+            if self.curr_index==self.__len__():
+                self.curr_index=0
             idx = np.arange(start=self.curr_index, stop=self.curr_index + self.batch_size)
             self.curr_index += self.batch_size
         for i in idx:
@@ -255,9 +258,8 @@ def mask_to_arr(image):
 if __name__ == '__main__':
     test_gen = ImageGenerator(1, join('leftImg8bit', 'train'), join('gtFine', 'train'), 'leftImg8bit', 'gtFine_color',
                               augmentation_fn, 3, False)
-    images, labels = next(test_gen)
-    print(labels.shape)
-    images, labels = next(test_gen)
-    print(labels.shape)
+    for epoch in range(2):
+        for i in tqdm(range(len(test_gen))):
+            images, labels = next(test_gen)
     # plt.imshow(labels[1,:,:,14])
     # plt.show()
