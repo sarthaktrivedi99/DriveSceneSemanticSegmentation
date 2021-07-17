@@ -14,7 +14,7 @@ from tqdm import tqdm
 class ImageGenerator(object):
 
     def __init__(self, batch_size, path_to_x, path_to_y, match_string_x, match_string_y, aug_fn, splits,
-                 random_generation=True) -> object:
+                 random_generation=True,random_len=500) -> object:
         """
         @param batch_size: Batch size
         @param path_to_x: Path to input images
@@ -36,6 +36,7 @@ class ImageGenerator(object):
         self.curr_index = 0
         self.list_paths_x = self.get_paths(path_to_x, match_string_x)
         self.splits = splits
+        self.random_len = random_len
         # self.list_paths_y = self.get_paths(path_to_y,match_string_y)
 
     def get_paths(self, path, match_string) -> list:
@@ -58,7 +59,11 @@ class ImageGenerator(object):
         Returns the length of the generator
         @return: int
         """
-        return (len(self.list_paths_x)) // self.batch_size
+        if not self.random_gen:
+            return (len(self.list_paths_x)) // self.batch_size
+        else:
+            return self.random_len
+
 
     def __next__(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -68,7 +73,7 @@ class ImageGenerator(object):
         batch_x = []
         batch_y = []
         if (self.random_gen):
-            idx = np.random.uniform(low=0, high=len(self.list_paths_x), size=(self.batch_size))
+            idx = np.random.uniform(low=0, high=len(self.list_paths_x), size=(self.batch_size)).astype(int)
         else:
             if self.curr_index==self.__len__():
                 self.curr_index=0
@@ -257,7 +262,7 @@ def mask_to_arr(image):
 
 if __name__ == '__main__':
     test_gen = ImageGenerator(1, join('leftImg8bit', 'train'), join('gtFine', 'train'), 'leftImg8bit', 'gtFine_color',
-                              augmentation_fn, 3, False)
+                              augmentation_fn, 3, True)
     for epoch in range(2):
         for i in tqdm(range(len(test_gen))):
             images, labels = next(test_gen)
