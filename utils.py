@@ -9,6 +9,7 @@ import psutil
 import matplotlib.pyplot as plt
 from collections import defaultdict
 from tqdm import tqdm
+from tensorflow.keras import backend as K
 # from numba import jit
 
 class ImageGenerator(object):
@@ -260,11 +261,22 @@ def mask_to_arr(image):
     #             continue
     return arr_to_categorical(arr)
 
+def jaccard_distance(y_true, y_pred, smooth=100):
+    intersection = K.sum(K.abs(y_true * y_pred), axis=-1)
+    sum_ = K.sum(K.abs(y_true) + K.abs(y_pred), axis=-1)
+    jac = (intersection + smooth) / (sum_ - intersection + smooth)
+    return (1 - jac) * smooth
+
 if __name__ == '__main__':
     test_gen = ImageGenerator(1, join('leftImg8bit', 'train'), join('gtFine', 'train'), 'leftImg8bit', 'gtFine_color',
                               augmentation_fn, 3, True)
-    for epoch in range(2):
-        for i in tqdm(range(len(test_gen))):
-            images, labels = next(test_gen)
+
+    images, labels = next(test_gen)
+    print(images.shape)
+    # for epoch in range(2):
+    #     for i in tqdm(range(len(test_gen))):
+    #         images, labels = next(test_gen)
+
+
     # plt.imshow(labels[1,:,:,14])
     # plt.show()
