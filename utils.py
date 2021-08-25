@@ -8,14 +8,14 @@ import random
 import psutil
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from tqdm import tqdm
+import cv2
 from tensorflow.keras import backend as K
-# from numba import jit
+import tensorflow as tf
 
 class ImageGenerator(object):
 
     def __init__(self, batch_size, path_to_x, path_to_y, match_string_x, match_string_y, aug_fn, splits,
-                 random_generation=True,random_len=500) -> object:
+                 random_generation=True,random_crop=None,resize_toggle=True) -> object:
         """
         @param batch_size: Batch size
         @param path_to_x: Path to input images
@@ -37,7 +37,8 @@ class ImageGenerator(object):
         self.curr_index = 0
         self.list_paths_x = self.get_paths(path_to_x, match_string_x)
         self.splits = splits
-        self.random_len = random_len
+        self.resize_toggle = resize_toggle
+        self.random_crop = random_crop
         # self.list_paths_y = self.get_paths(path_to_y,match_string_y)
 
     def get_paths(self, path, match_string) -> list:
@@ -60,10 +61,7 @@ class ImageGenerator(object):
         Returns the length of the generator
         @return: int
         """
-        if not self.random_gen:
-            return (len(self.list_paths_x)) // self.batch_size
-        else:
-            return self.random_len
+        return (len(self.list_paths_x)) // self.batch_size
 
 
     def __next__(self) -> Tuple[np.ndarray, np.ndarray]:
@@ -84,8 +82,11 @@ class ImageGenerator(object):
             x_sample = np.asarray(Image.open(self.list_paths_x[i]).convert('RGB')) / 255
             y_path = self.get_path_y(self.list_paths_x[i])
             y_sample = np.asarray(Image.open(y_path).convert('RGB'))
-            if random.choice([True, False]):
-                x_sample, y_sample = self.aug_fn(x_sample, y_sample)
+            if self.resize_toggle==True:
+                x_sample,y_sample = self.resize(x_sample,y_sample)
+            if self.aug_fn!=None:
+                if random.choice([True, False]):
+                    x_sample, y_sample = self.aug_fn(x_sample, y_sample,crop_size=self.random_crop)
             y_sample = mask_to_arr(y_sample)
             if self.splits>1:
                 x_sample = split(x_sample,self.splits)
@@ -98,6 +99,10 @@ class ImageGenerator(object):
                 batch_x.append(x_sample)
         return np.asarray(batch_x), np.asarray(batch_y)
 
+    def resize(self,x,y,shape=(1024,512)):
+        x = cv2.resize(x,shape)
+        y = cv2.resize(y,shape,interpolation=cv2.INTER_NEAREST)
+        return x,y
 
     def get_path_y(self,path) -> str:
         """
@@ -174,8 +179,8 @@ class ImageGenerator(object):
 def split(image,splits):
     patches = []
     # print(image.shape)
-    patch_h = image.shape[0] //(splits+1)
-    patch_w = image.shape[1] //(splits+1)
+    patch_h = image.shape[0] //(splits)
+    patch_w = image.shape[1] //(splits)
     for i in range(splits):
         # print(i*patch_h)
         patches.append(image[i*patch_h:(i+1)*patch_h,i*patch_w:(i+1)*patch_w,:])
@@ -214,7 +219,7 @@ def get_color() -> dict:
     return  color_dict
 
 
-def augmentation_fn(x, y, rotation=True, noise=True) -> Tuple[np.ndarray, np.ndarray]:
+def augmentation_fn(x, y, crop_size) -> Tuple[np.ndarray, np.ndarray]:
     """
     @param x: Input Image
     @param y: Segmentation Image
@@ -223,14 +228,11 @@ def augmentation_fn(x, y, rotation=True, noise=True) -> Tuple[np.ndarray, np.nda
     @param noise: Switch to enable adding noise to Input Image
     @rtype: Tuple[np.ndarray,np.ndarray]
     """
-    if rotation:
-        ang = int(random.uniform(0, 360))
-        x = rotate(x, angle=ang, reshape=False)
-        y = rotate(y, angle=ang, reshape=False)
-    if noise:
-        noise = np.random.normal(loc=0.1, scale=0.01, size=x.shape)
-        x = x + noise
-    return x, y
+    h,w = x.shape[1,2]
+    new_h,new_w = int(h*crop_size),int(y*crop_size)
+    start_h,start_w = np.random.uniform(0,h-new_h), np.random.uniform(0,w-new_w)
+    x_new,y_new = x[start_h:start_h+new_h,start_w:start_w+new_w], y[start_h:start_h+new_h,start_w:start_w+new_w]
+    return x_new, y_new
 
 
 def arr_to_categorical(image):
@@ -261,22 +263,42 @@ def mask_to_arr(image):
     #             continue
     return arr_to_categorical(arr)
 
-def jaccard_distance(y_true, y_pred, smooth=100):
-    intersection = K.sum(K.abs(y_true * y_pred), axis=-1)
-    sum_ = K.sum(K.abs(y_true) + K.abs(y_pred), axis=-1)
-    jac = (intersection + smooth) / (sum_ - intersection + smooth)
-    return (1 - jac) * smooth
+def categorical_to_img(arr):
+    s,h,w = arr.shape[:-1]
+    argmax_arr = np.argmax(arr,axis=-1)
+    img = np.zeros(shape=(s,h,w,3))
+    color_dict = get_color()
+    for i in range(s):
+        for j in color_dict.keys():
+            img[i][argmax_arr[i]==j] = color_dict[j]
+    return img
+
 
 if __name__ == '__main__':
+    from losses import custom_MeanIOU
     test_gen = ImageGenerator(1, join('leftImg8bit', 'train'), join('gtFine', 'train'), 'leftImg8bit', 'gtFine_color',
-                              augmentation_fn, 3, True)
+                              None, 1, True)
 
     images, labels = next(test_gen)
-    print(images.shape)
+    m = custom_MeanIOU(num_classes=20)
+    # arr = mask_to_arr(labels)
+    img = categorical_to_img(labels)
+    m.update_state(labels,labels)
+    print(m.result().numpy())
+    # print(img[0])
+    for i in range(img.shape[0]):
+        plt.imshow(img[i]/255)
+        plt.show()
+        plt.clf()
+        plt.imshow(images[i])
+        plt.show()
+        plt.clf()
+        plt.imshow(labels[0,:,:,1])
+        plt.show()
+    # print(images.shape)
     # for epoch in range(2):
     #     for i in tqdm(range(len(test_gen))):
     #         images, labels = next(test_gen)
-
 
     # plt.imshow(labels[1,:,:,14])
     # plt.show()
