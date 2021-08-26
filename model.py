@@ -1,8 +1,55 @@
 from tensorflow.keras.models import Model
 from tensorflow.keras.backend import int_shape
 from tensorflow.keras.layers import Activation, Dropout, Conv2D, Conv2DTranspose, Input, BatchNormalization, \
-    concatenate, MaxPooling2D, Cropping2D
+    concatenate, MaxPooling2D, Cropping2D,add,multiply,Lambda,UpSampling2D
+import tensorflow.keras.backend as K
 
+def attention_up_and_concate(down_layer, layer, data_format='channels_first'):
+    if data_format == 'channels_first':
+        in_channel = down_layer.get_shape().as_list()[1]
+    else:
+        in_channel = down_layer.get_shape().as_list()[3]
+
+    # up = Conv2DTranspose(out_channel, [2, 2], strides=[2, 2])(down_layer)
+    up = UpSampling2D(size=(2, 2))(down_layer)
+
+    layer = attention_block_2d(x=layer, g=up, inter_channel=in_channel // 4, data_format=data_format)
+
+    if data_format == 'channels_first':
+        my_concat = Lambda(lambda x: K.concatenate([x[0], x[1]], axis=1))
+    else:
+        my_concat = Lambda(lambda x: K.concatenate([x[0], x[1]], axis=3))
+
+    concate = my_concat([up, layer])
+    return concate
+
+
+def attention_block_2d(x, g, inter_channel, data_format='channels_first'):
+    # theta_x(?,g_height,g_width,inter_channel)
+
+    theta_x = Conv2D(inter_channel, [1, 1], strides=[1, 1])(x)
+
+    # phi_g(?,g_height,g_width,inter_channel)
+
+    phi_g = Conv2D(inter_channel, [1, 1], strides=[1, 1])(g)
+
+    # f(?,g_height,g_width,inter_channel)
+
+    f = Activation('relu')(add([theta_x, phi_g]))
+
+    # psi_f(?,g_height,g_width,1)
+
+    psi_f = Conv2D(1, [1, 1], strides=[1, 1])(f)
+
+    rate = Activation('sigmoid')(psi_f)
+
+    # rate(?,x_height,x_width)
+
+    # att_x(?,x_height,x_width,x_channel)
+
+    att_x = multiply([x, rate])
+
+    return att_x
 
 def inception_block(layer_in, f1, f2_in, f2_out, f3_in, f3_out, f4_out):
     # 1x1 conv
@@ -25,6 +72,14 @@ def deconv_inception_block(input, concatenation_tensor, n_filters, padding='vali
     x = Conv2DTranspose(n_filters, kernel_size=(2, 2), strides=(2, 2), padding=padding)(input)
     # x = Attention()([x, concatenation_tensor])
     x = concatenate([x, concatenation_tensor])
+    # x = Dropout(0.5)(x)
+    x = inception_block(x, f1=n_filters//4, f2_in=n_filters//3, f2_out=n_filters,f3_in=n_filters//2,f3_out=n_filters//3,f4_out=n_filters//8)
+    return x
+
+def deconv_inception_block_att(input, concatenation_tensor, n_filters, padding='valid'):
+    y = attention_up_and_concate(input,concatenation_tensor,n_filters)
+    x = Conv2DTranspose(n_filters, kernel_size=(2, 2), strides=(2, 2), padding=padding)(input)
+    x = concatenate([x, y])
     # x = Dropout(0.5)(x)
     x = inception_block(x, f1=n_filters//4, f2_in=n_filters//3, f2_out=n_filters,f3_in=n_filters//2,f3_out=n_filters//3,f4_out=n_filters//8)
     return x
@@ -90,6 +145,7 @@ def UNET(
     return model
 
 
+
 def UNET_inception(
         input_shape,
         num_classes=1,
@@ -116,6 +172,32 @@ def UNET_inception(
     model = Model(inputs=[input], outputs=[outputs])
     return model
 
+def UNET_inception_att(
+        input_shape,
+        num_classes=1,
+        filters=64,
+        num_layers=4,
+        output_activation='softmax'
+):
+    input = Input(input_shape)
+    x = input
+    down_layers = []
+    for l in range(num_layers):
+        x = inception_block(x, filters//4, filters//3, filters,filters//2,filters//3,filters//8)
+        down_layers.append(x)
+        x = MaxPooling2D((2, 2))(x)
+        filters = filters * 2
+
+    x = inception_block(x, filters//4, filters//3, filters,filters//2,filters//3,filters//8)
+
+    for conv in reversed(down_layers):
+        filters //= 2  # decreasing number of filters with each layer
+        x = deconv_inception_block_att(input=x, concatenation_tensor=conv, n_filters=filters, padding='same')
+    outputs = Conv2D(num_classes, (1, 1), activation=output_activation)(x)
+
+    model = Model(inputs=[input], outputs=[outputs])
+    return model
+
 
 if __name__ == '__main__':
-    UNET(input_shape=(None, None, 3), num_classes=20).summary()
+    UNET_inception_att(input_shape=(None, None, 3), num_classes=20).summary()
