@@ -11,12 +11,14 @@ from collections import defaultdict
 import cv2
 from tensorflow.keras import backend as K
 import tensorflow as tf
+from skimage.filters.edges import sobel
 
 class ImageGenerator(object):
 
     def __init__(self, batch_size, path_to_x, path_to_y, match_string_x, match_string_y, aug_fn, splits,
                  random_generation=True,random_crop=None,resize_toggle=True) -> object:
         """
+        Generator class for generating inout,label pairs
         @param batch_size: Batch size
         @param path_to_x: Path to input images
         @param path_to_y: Path to segmented images
@@ -36,7 +38,7 @@ class ImageGenerator(object):
         self.random_gen = random_generation
         self.curr_index = 0
         self.list_paths_x = self.get_paths(path_to_x, match_string_x)
-        self.splits = splits
+        # self.splits = splits
         self.resize_toggle = resize_toggle
         self.random_crop = random_crop
         # self.list_paths_y = self.get_paths(path_to_y,match_string_y)
@@ -71,6 +73,7 @@ class ImageGenerator(object):
         """
         batch_x = []
         batch_y = []
+        batch_bmap = []
         if (self.random_gen):
             idx = np.random.uniform(low=0, high=len(self.list_paths_x), size=(self.batch_size)).astype(int)
         else:
@@ -85,22 +88,43 @@ class ImageGenerator(object):
             if self.resize_toggle==True:
                 x_sample,y_sample = self.resize(x_sample,y_sample)
             if self.aug_fn!=None:
-                if random.choice([True, False]):
-                    x_sample, y_sample = self.aug_fn(x_sample, y_sample,crop_size=self.random_crop)
+                x_sample, y_sample = self.aug_fn(x_sample, y_sample,crop_size=self.random_crop)
             y_sample = mask_to_arr(y_sample)
-            if self.splits>1:
-                x_sample = split(x_sample,self.splits)
-                y_sample = split(y_sample,self.splits)
-                for i in range(self.splits):
-                    batch_x.append(x_sample[i])
-                    batch_y.append(y_sample[i])
-            else:
-                batch_y.append(y_sample)
-                batch_x.append(x_sample)
+            # if self.bmap:
+            #     bmap_sample = self.seg2bmap(y_sample)
+            #     bmap_sample[bmap_sample>0] = 1
+            # if self.splits>1:
+            #     x_sample = split(x_sample,self.splits)
+            #     y_sample = split(y_sample,self.splits)
+            #     for i in range(self.splits):
+            #         batch_x.append(x_sample[i])
+            #         batch_y.append(y_sample[i])
+            # else:
+            # if self.bmap:
+            #     batch_y.append(y_sample)
+            #     batch_x.append(x_sample)
+            #     batch_bmap.append(bmap_sample)
+
+            batch_y.append(y_sample)
+            batch_x.append(x_sample)
         return np.asarray(batch_x), np.asarray(batch_y)
 
-    def resize(self,x,y,shape=(1024,512)):
-        x = cv2.resize(x,shape)
+    # def seg2bmap(self,seg, width=None, height=None):
+    #  sobel_arr = []
+    #  for i in range(seg.shape[-1]):
+    #     sobel_arr.append(sobel(seg[...,i]))
+    #  return np.asarray(np.sum(sobel_arr,axis=0))
+
+    def resize(self,x,y,shape=(1024,512))-> Tuple[np.ndarray,np.ndarray]:
+        """
+        Resize function to reduce the dimension of the image,label pair
+        Enables training on smaller GPUs
+        @param x: Image
+        @param y: Label
+        @param shape: Desired output shape tupple
+        @return: resized image,label pair
+        """
+        x = cv2.resize(x,shape,interpolation=cv2.INTER_NEAREST)
         y = cv2.resize(y,shape,interpolation=cv2.INTER_NEAREST)
         return x,y
 
@@ -176,16 +200,11 @@ class ImageGenerator(object):
 #     ]
 #     return labels
 
-def split(image,splits):
-    patches = []
-    # print(image.shape)
-    patch_h = image.shape[0] //(splits)
-    patch_w = image.shape[1] //(splits)
-    for i in range(splits):
-        # print(i*patch_h)
-        patches.append(image[i*patch_h:(i+1)*patch_h,i*patch_w:(i+1)*patch_w,:])
-    return  patches
 def get_label() -> dict:
+    """
+    Returns label dictonary for specified RGB values
+    @return: label dictionary
+    """
     label_dict = {
         (0,0,0):0,
         (128, 64, 128):1,
@@ -214,6 +233,10 @@ def get_label() -> dict:
 
 
 def get_color() -> dict:
+    """
+    Returns inverted label dictionary
+    @return: inverted label dictionary
+    """
     label_dict = get_label()
     color_dict = {value: key for (key, value) in label_dict.items()}
     return  color_dict
@@ -221,17 +244,24 @@ def get_color() -> dict:
 
 def augmentation_fn(x, y, crop_size) -> Tuple[np.ndarray, np.ndarray]:
     """
+    Augments the image,label pair
+    This augmentation helps in learning more robust features
     @param x: Input Image
     @param y: Segmentation Image
-    @param rotation: Switch to enable rotation of image
-    @param zoom_: Switch to enable Zoom
-    @param noise: Switch to enable adding noise to Input Image
     @rtype: Tuple[np.ndarray,np.ndarray]
     """
-    h,w = x.shape[1,2]
-    new_h,new_w = int(h*crop_size),int(y*crop_size)
-    start_h,start_w = np.random.uniform(0,h-new_h), np.random.uniform(0,w-new_w)
-    x_new,y_new = x[start_h:start_h+new_h,start_w:start_w+new_w], y[start_h:start_h+new_h,start_w:start_w+new_w]
+    h,w = x.shape[0],x.shape[1]
+    # Random cropping
+    new_h,new_w = int(h*crop_size),int(w*crop_size)
+    start_h,start_w = int(np.random.uniform(0,h-new_h)), int(np.random.uniform(0,w-new_w))
+    x_new,y_new = x[start_h:(start_h+new_h),start_w:(start_w+new_w),:], y[start_h:(start_h+new_h),start_w:(start_w+new_w),:]
+    i = np.random.choice([0,90,180,270])
+    x_new = rotate(x_new,i)
+    y_new = rotate(y_new,i)
+    i = np.random.choice([True,False])
+    if i:
+        x_new = np.fliplr(x_new)
+        y_new = np.fliplr(y_new)
     return x_new, y_new
 
 
@@ -246,7 +276,12 @@ def arr_to_categorical(image):
     return cp.reshape((image.shape[0],image.shape[1],len(get_label().items())))
 
 
-def mask_to_arr(image):
+def mask_to_arr(image)-> np.ndarray:
+    """
+    Converts a RGB image to array containing class for each pixel in the RGB image.
+    @param image: RGB image
+    @return: categorical array
+    """
     label_dict = get_label()
     arr = np.zeros((image.shape[0],image.shape[1],1))
     for i,j in label_dict.items():
@@ -263,7 +298,14 @@ def mask_to_arr(image):
     #             continue
     return arr_to_categorical(arr)
 
-def categorical_to_img(arr):
+def categorical_to_img(arr)-> np.ndarray:
+    """
+    Converts categorical array to image
+    input: softmax array
+    output: image
+    @param arr: input softmax image from the model
+    @return: RGB image
+    """
     s,h,w = arr.shape[:-1]
     argmax_arr = np.argmax(arr,axis=-1)
     img = np.zeros(shape=(s,h,w,3))
@@ -274,31 +316,29 @@ def categorical_to_img(arr):
     return img
 
 
-if __name__ == '__main__':
-    from losses import custom_MeanIOU
-    test_gen = ImageGenerator(1, join('leftImg8bit', 'train'), join('gtFine', 'train'), 'leftImg8bit', 'gtFine_color',
-                              None, 1, True)
-
-    images, labels = next(test_gen)
-    m = custom_MeanIOU(num_classes=20)
-    # arr = mask_to_arr(labels)
-    img = categorical_to_img(labels)
-    m.update_state(labels,labels)
-    print(m.result().numpy())
-    # print(img[0])
-    for i in range(img.shape[0]):
-        plt.imshow(img[i]/255)
-        plt.show()
-        plt.clf()
-        plt.imshow(images[i])
-        plt.show()
-        plt.clf()
-        plt.imshow(labels[0,:,:,1])
-        plt.show()
-    # print(images.shape)
-    # for epoch in range(2):
-    #     for i in tqdm(range(len(test_gen))):
-    #         images, labels = next(test_gen)
-
-    # plt.imshow(labels[1,:,:,14])
-    # plt.show()
+# if __name__ == '__main__':
+#     test_gen = ImageGenerator(1, join('leftImg8bit', 'train'), join('gtFine', 'train'), 'leftImg8bit', 'gtFine_color',
+#                               augmentation_fn, 1, True,random_crop=0.75,bmap=True)
+#
+#     images, labels= next(test_gen)
+#     # arr = mask_to_arr(labels)
+#     img = categorical_to_img(labels['output'])
+#     # print(img[0])
+#     for i in range(img.shape[0]):
+#         plt.imshow(img[i]/255)
+#         plt.show()
+#         plt.imshow(labels['edge'][i,:,:],cmap='gray')
+#         plt.show()
+#         plt.clf()
+#         # plt.imshow(images[i])
+#         # plt.show()
+#         # plt.clf()
+#         # plt.imshow(labels[0,:,:,1])
+#         # plt.show()
+#     # print(images.shape)
+#     # for epoch in range(2):
+#     #     for i in tqdm(range(len(test_gen))):
+#     #         images, labels = next(test_gen)
+#
+#     # plt.imshow(labels[1,:,:,14])
+#     # plt.show()
